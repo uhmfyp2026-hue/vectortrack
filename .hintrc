@@ -3,6 +3,115 @@
     "development"
   ],
   "hints": {
-    "apple-touch-icons": "off"
+    "apple-touch-icons": "off",
+    "compat-api/css": [
+      "default",
+      {
+        "ignore": [
+          "backdrop-filter",
+          "mask-image",
+          "filter",
+          "backdrop-filter",
+          "clip-path"
+        ]
+      }
+    ],
+    "compat-api/html": [
+      "default",
+      {
+        "ignore": [
+          "import-map"
+        ]
+      }
+    ],
+    "compat-api/js": [
+      "default",
+      {
+        "ignore": [
+          "geolocation",
+          "serviceworker",
+          "promises",
+          "fetch"
+        ]
+      }
+    ],
+    "compat-api/es": [
+      "default",
+      {
+        "ignore": [
+          "arrow-functions",
+          "let-const",
+          "template-literals",
+          "destructuring",
+          "modules"
+        ]
+      }
+    ],
+    "http-cache": [
+      "warning",
+      {
+        "maxAgeTarget": 31536000,
+        "maxAgeResource": 86400
+      }
+    ],
+    "http-compression": "warning",
+    "content-type": "warning",
+    "no-html-only-headers": "warning",
+    "no-protocol-relative-urls": "warning",
+    "no-friendly-error-pages": "off",
+    "highest-available-document-mode": "warning",
+    "x-content-type-options": "warning",
+    "meta-charset-utf-8": "warning",
+    "meta-viewport": "off",
+    "no-http-redirects": [
+      "warning",
+      {
+        "maxRedirects": 1
+      }
+    ],
+    "optimize-images": "warning",
+    "optimize-setinterval": "warning",
+    "no-vulnerable-javascript-libraries": "warning",
+    "no-bom": "warning",
+    "disown-opener": "warning",
+    "button-name": "warning",
+    "image-alt": "warning",
+    "label-title": "warning",
+    "link-name": "warning",
+    "meta-refresh": "warning",
+    "valid-lang": "warning",
+    "manifest-app-name": "warning",
+    "manifest-exists": "warning",
+    "manifest-icons": "warning",
+    "manifest-is-valid": "warning",
+    "manifest-background-color": "warning",
+    "manifest-theme-color": "warning",
+    "manifest-display": "warning",
+    "manifest-orientation": "warning",
+    "service-worker": "warning",
+    "structured-data": "off",
+    "performance-budget": [
+      "warning",
+      {
+        "budgets": [
+          {
+            "resource-type": "script",
+            "budget": 300
+          },
+          {
+            "resource-type": "stylesheet",
+            "budget": 100
+          },
+          {
+            "resource-type": "image",
+            "budget": 500
+          },
+          {
+            "resource-type": "total",
+            "budget": 1000
+          }
+        ]
+      }
+    ]
   }
 }
