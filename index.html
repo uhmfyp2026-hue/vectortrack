@@ -2,16 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>VectorTrack — Professional Distance Tracker</title>
+    
     <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <!-- Preconnect for fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     
     <!-- Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@200;300;400;500;600;700;800&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
     
     <!-- Main stylesheet -->
     <link rel="stylesheet" href="styles.css">
@@ -23,10 +25,10 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00f0ff">
-    <meta name="permissions-policy" content="geolocation=(self)">
+    <meta name="format-detection" content="telephone=no">
     
     <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%2300f0ff'/%3E%3Ccircle cx='50' cy='50' r='15' fill='%23000000'/%3E%3C/svg%3E">
+    <link rel="icon" type="image/png" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%2300f0ff'/%3E%3Ccircle cx='50' cy='50' r='15' fill='%23000000'/%3E%3C/svg%3E">
 </head>
 <body>
     <!-- Background noise layer -->
@@ -40,20 +42,6 @@
                 <stop offset="50%" stop-color="#a3e635"/>
                 <stop offset="100%" stop-color="#ff2d75"/>
             </linearGradient>
-            
-            <linearGradient id="buttonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.2"/>
-                <stop offset="50%" stop-color="#ff2d75" stop-opacity="0.2"/>
-                <stop offset="100%" stop-color="#00f0ff" stop-opacity="0.2"/>
-            </linearGradient>
-            
-            <filter id="glow">
-                <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
-                <feMerge>
-                    <feMergeNode in="coloredBlur"/>
-                    <feMergeNode in="SourceGraphic"/>
-                </feMerge>
-            </filter>
         </defs>
     </svg>
     
@@ -66,14 +54,12 @@
                     <circle cx="20" cy="20" r="17" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 2"/>
                     <circle cx="20" cy="20" r="11" stroke="currentColor" stroke-width="0.8" stroke-dasharray="3 2"/>
                     <path d="M20 5 L20 20 L30 30" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                    <circle cx="20" cy="20" r="3" fill="currentColor">
-                        <animate attributeName="r" values="3;4;3" dur="2s" repeatCount="indefinite"/>
-                    </circle>
+                    <circle cx="20" cy="20" r="3" fill="currentColor"/>
                 </svg>
                 VectorTrack
             </div>
             <div class="badge">
-                <span></span>
+                <span class="badge-dot"></span>
                 LIVE
             </div>
         </header>
@@ -87,14 +73,15 @@
                 <span class="corner corner-bl"></span>
                 <span class="corner corner-br"></span>
                 
-                <p class="hero-label">Total Distance</p>
+                <div class="hero-label">Total Distance</div>
                 
                 <div class="distance-display">
                     <span id="distanceValue">0.00</span>
                     <span class="unit" id="unitLabel">m</span>
                 </div>
                 
-                <p class="status-line" id="status">Ready to track</p>
+                <div class="speed-display" id="speedDisplay">0.0 km/h</div>
+                <div class="status-line" id="status">Ready to track</div>
             </div>
             
             <!-- Ring Gauge -->
@@ -111,19 +98,33 @@
                 </div>
             </div>
             
-            <!-- Map -->
-            <div id="map"></div>
+            <!-- Map Container -->
+            <div id="map-container">
+                <div id="map"></div>
+            </div>
             
             <!-- Stats Row -->
             <div class="stats-row">
                 <div class="stat">
-                    <span class="stat-label">Origin</span>
-                    <span class="stat-value" id="startCoords">—</span>
+                    <div class="stat-label">Origin</div>
+                    <div class="stat-value" id="startCoords">—</div>
                 </div>
                 <div class="stat-divider"></div>
                 <div class="stat">
-                    <span class="stat-label">Current</span>
-                    <span class="stat-value" id="endCoords">—</span>
+                    <div class="stat-label">Current</div>
+                    <div class="stat-value" id="endCoords">—</div>
+                </div>
+            </div>
+            
+            <!-- Speed Stats -->
+            <div class="speed-stats">
+                <div class="stat">
+                    <div class="stat-label">Current Speed</div>
+                    <div class="stat-value" id="currentSpeed">0.0 km/h</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">Max Speed</div>
+                    <div class="stat-value" id="maxSpeed">0.0 km/h</div>
                 </div>
             </div>
             
@@ -131,14 +132,14 @@
             <div class="controls">
                 <button class="btn btn-start" id="startBtn">
                     <svg viewBox="0 0 24 24" fill="currentColor">
-                        <polygon points="5,3 19,12 5,21" fill="currentColor"/>
+                        <polygon points="5,3 19,12 5,21"/>
                     </svg>
                     <span>Start</span>
                 </button>
                 
                 <button class="btn btn-stop" id="stopBtn" disabled>
                     <svg viewBox="0 0 24 24" fill="currentColor">
-                        <rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/>
+                        <rect x="4" y="4" width="16" height="16" rx="2"/>
                     </svg>
                     <span>Stop</span>
                 </button>
@@ -152,6 +153,19 @@
                 </button>
             </div>
             
+            <!-- Trips Section -->
+            <div class="trips-section">
+                <div class="trips-header">
+                    <span>Recent Trips</span>
+                    <span id="tripsCount">0 trips</span>
+                </div>
+                <div class="trips-body" id="tripsBody">
+                    <div class="trips-empty">
+                        No trips recorded yet. Press Start to begin.
+                    </div>
+                </div>
+            </div>
+            
             <!-- Log Section -->
             <div class="log-section">
                 <div class="log-header">
@@ -160,7 +174,7 @@
                 </div>
                 <div class="log-body" id="logBody">
                     <div class="log-empty">
-                        No events recorded yet. Press Start to begin tracking.
+                        No events recorded yet.
                     </div>
                 </div>
             </div>
