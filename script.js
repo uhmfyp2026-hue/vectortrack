@@ -1,11 +1,18 @@
 /* ==============================================================
-   VectorTrack Professional - Distance Tracker
-   Fixed with proper speed calculation
+   VectorTrack Professional - Complete Fixed Version
+   With map, speed, and trip storage working
    ============================================================== */
 
-// Wait for DOM to be fully loaded
-document.addEventListener('DOMContentLoaded', function() {
+// Wait for DOM and Leaflet to be ready
+window.addEventListener('load', function() {
     'use strict';
+    
+    // Check if Leaflet is loaded
+    if (typeof L === 'undefined') {
+        console.error('Leaflet not loaded');
+        alert('Map library failed to load. Please refresh the page.');
+        return;
+    }
     
     // ==========================================================
     // DOM Elements
@@ -16,6 +23,9 @@ document.addEventListener('DOMContentLoaded', function() {
         resetBtn: document.getElementById('resetBtn'),
         distanceValue: document.getElementById('distanceValue'),
         unitLabel: document.getElementById('unitLabel'),
+        speedDisplay: document.getElementById('speedDisplay'),
+        currentSpeed: document.getElementById('currentSpeed'),
+        maxSpeed: document.getElementById('maxSpeed'),
         statusEl: document.getElementById('status'),
         startCoords: document.getElementById('startCoords'),
         endCoords: document.getElementById('endCoords'),
@@ -23,18 +33,29 @@ document.addEventListener('DOMContentLoaded', function() {
         ringLabel: document.getElementById('ringLabel'),
         pulseDot: document.getElementById('pulseDot'),
         logBody: document.getElementById('logBody'),
-        logCountEl: document.getElementById('logCount')
+        logCountEl: document.getElementById('logCount'),
+        tripsBody: document.getElementById('tripsBody'),
+        tripsCount: document.getElementById('tripsCount')
     };
+
+    // Verify all elements exist
+    for (let [key, element] of Object.entries(elements)) {
+        if (!element) {
+            console.warn(`Element ${key} not found`);
+        }
+    }
 
     // ==========================================================
     // Configuration
     // ==========================================================
     const CONFIG = {
         MIN_DISTANCE: 3,        // Minimum distance change to record (meters)
-        MAX_ACCURACY: 30,       // Maximum allowed GPS accuracy (meters)
+        MAX_ACCURACY: 50,       // Maximum allowed GPS accuracy (meters)
         RING_MAX: 5000,         // Ring gauge max distance (5km)
         RING_CIRCUMFERENCE: 534, // SVG circle circumference
-        SPEED_SMOOTHING: 0.3    // Speed smoothing factor (0-1)
+        UPDATE_INTERVAL: 1000,   // Update UI every second
+        MAX_LOG_ENTRIES: 20,     // Maximum log entries to keep
+        MAX_TRIPS: 10            // Maximum trips to keep
     };
 
     // ==========================================================
@@ -43,6 +64,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let state = {
         map: null,
         polyline: null,
+        marker: null,
         routePath: [],
         watchId: null,
         totalDistance: 0,
@@ -51,10 +73,12 @@ document.addEventListener('DOMContentLoaded', function() {
         startTime: null,
         isTracking: false,
         logCount: 0,
+        tripCount: 0,
         lastAccuracy: null,
         currentSpeed: 0,
         maxSpeed: 0,
-        speedHistory: []
+        speedHistory: [],
+        trips: []
     };
 
     // ==========================================================
@@ -84,33 +108,17 @@ document.addEventListener('DOMContentLoaded', function() {
      */
     function calculateSpeed(distanceMeters, timeSeconds) {
         if (timeSeconds <= 0) return 0;
-        const speedMs = distanceMeters / timeSeconds; // meters per second
+        const speedMs = distanceMeters / timeSeconds;
         return speedMs * 3.6; // Convert to km/h
     }
 
     /**
-     * Smooth speed value using exponential moving average
+     * Format speed for display
      */
-    function smoothSpeed(newSpeed) {
-        if (state.speedHistory.length === 0) return newSpeed;
-        
-        // Add to history
-        state.speedHistory.push(newSpeed);
-        if (state.speedHistory.length > 5) {
-            state.speedHistory.shift();
-        }
-        
-        // Calculate weighted average (more recent = higher weight)
-        let totalWeight = 0;
-        let weightedSum = 0;
-        
-        for (let i = 0; i < state.speedHistory.length; i++) {
-            const weight = i + 1; // Later entries have higher weight
-            weightedSum += state.speedHistory[i] * weight;
-            totalWeight += weight;
-        }
-        
-        return weightedSum / totalWeight;
+    function formatSpeed(speedKmh) {
+        if (isNaN(speedKmh) || speedKmh < 0) return '0.0';
+        if (speedKmh < 10) return speedKmh.toFixed(1);
+        return Math.round(speedKmh).toString();
     }
 
     /**
@@ -122,26 +130,51 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     /**
-     * Format speed for display
+     * Format date for display
      */
-    function formatSpeed(speedKmh) {
-        if (speedKmh < 0.1) return '0.0 km/h';
-        if (speedKmh < 10) return speedKmh.toFixed(1) + ' km/h';
-        return Math.round(speedKmh) + ' km/h';
+    function formatDate(timestamp) {
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diff = now - date;
+        
+        if (diff < 3600000) { // Less than 1 hour
+            const mins = Math.floor(diff / 60000);
+            return `${mins} min${mins !== 1 ? 's' : ''} ago`;
+        } else if (diff < 86400000) { // Less than 24 hours
+            const hours = Math.floor(diff / 3600000);
+            return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+        } else {
+            return date.toLocaleDateString();
+        }
     }
 
     /**
-     * Update distance display with appropriate units
+     * Update distance display
      */
     function updateDistanceDisplay(meters) {
         if (!elements.distanceValue || !elements.unitLabel) return;
         
         if (meters >= 1000) {
-            elements.distanceValue.textContent = (meters / 1000).toFixed(3);
+            elements.distanceValue.textContent = (meters / 1000).toFixed(2);
             elements.unitLabel.textContent = 'km';
         } else {
-            elements.distanceValue.textContent = meters.toFixed(1);
+            elements.distanceValue.textContent = meters.toFixed(0);
             elements.unitLabel.textContent = 'm';
+        }
+    }
+
+    /**
+     * Update speed displays
+     */
+    function updateSpeedDisplay() {
+        if (elements.speedDisplay) {
+            elements.speedDisplay.textContent = `${formatSpeed(state.currentSpeed)} km/h`;
+        }
+        if (elements.currentSpeed) {
+            elements.currentSpeed.textContent = `${formatSpeed(state.currentSpeed)} km/h`;
+        }
+        if (elements.maxSpeed) {
+            elements.maxSpeed.textContent = `${formatSpeed(state.maxSpeed)} km/h`;
         }
     }
 
@@ -155,23 +188,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const offset = CONFIG.RING_CIRCUMFERENCE * (1 - fraction);
         elements.ringFill.style.strokeDashoffset = offset;
         
-        // Update ring label based on progress
         if (elements.ringLabel) {
             if (fraction >= 1) {
                 elements.ringLabel.textContent = 'MAX';
-                elements.ringLabel.style.color = 'var(--magenta)';
             } else if (fraction > 0.7) {
                 elements.ringLabel.textContent = 'HIGH';
-                elements.ringLabel.style.color = 'var(--lime)';
             } else if (fraction > 0.3) {
                 elements.ringLabel.textContent = 'ACTIVE';
-                elements.ringLabel.style.color = 'var(--cyan)';
             }
         }
     }
 
     /**
-     * Update status display with speed
+     * Update status display
      */
     function updateStatus() {
         if (!elements.statusEl) return;
@@ -181,31 +210,25 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
-        const speedText = formatSpeed(state.currentSpeed);
-        const accuracyText = state.lastAccuracy ? ` ±${state.lastAccuracy.toFixed(0)}m` : '';
-        
-        if (state.maxSpeed > 0) {
-            elements.statusEl.textContent = `${speedText} • Max: ${formatSpeed(state.maxSpeed)}${accuracyText}`;
-        } else {
-            elements.statusEl.textContent = `${speedText}${accuracyText}`;
+        let status = `${formatSpeed(state.currentSpeed)} km/h`;
+        if (state.lastAccuracy) {
+            status += ` • ±${state.lastAccuracy.toFixed(0)}m`;
         }
+        elements.statusEl.textContent = status;
     }
 
     /**
      * Add entry to activity log
      */
-    function addLog(type, message, speed = null) {
+    function addLog(type, message) {
         if (!elements.logBody || !elements.logCountEl) return;
         
-        // Remove empty state if present
         const emptyLog = elements.logBody.querySelector('.log-empty');
         if (emptyLog) emptyLog.remove();
         
-        // Increment log count
         state.logCount++;
         elements.logCountEl.textContent = `${state.logCount} events`;
         
-        // Create log entry
         const entry = document.createElement('div');
         entry.className = 'log-entry';
         
@@ -215,23 +238,18 @@ document.addEventListener('DOMContentLoaded', function() {
             second: '2-digit'
         });
         
-        let displayMessage = message;
-        if (speed !== null) {
-            displayMessage += ` • ${formatSpeed(speed)}`;
-        }
-        
         entry.innerHTML = `
             <div class="log-dot ${type}"></div>
             <div class="log-content">
-                <div class="log-msg">${displayMessage}</div>
+                <div class="log-msg">${message}</div>
                 <div class="log-time">${time}</div>
             </div>
         `;
         
-        elements.logBody.prepend(entry);
+        elements.logBody.insertBefore(entry, elements.logBody.firstChild);
         
         // Limit log entries
-        while (elements.logBody.children.length > 20) {
+        while (elements.logBody.children.length > CONFIG.MAX_LOG_ENTRIES) {
             elements.logBody.removeChild(elements.logBody.lastChild);
         }
     }
@@ -245,24 +263,113 @@ document.addEventListener('DOMContentLoaded', function() {
         if (isTracking) {
             document.body.classList.add('tracking');
             if (elements.pulseDot) elements.pulseDot.classList.add('active');
-            if (elements.ringLabel) {
-                elements.ringLabel.textContent = 'TRACKING';
-                elements.ringLabel.style.color = '';
-            }
+            if (elements.ringLabel) elements.ringLabel.textContent = 'TRACKING';
         } else {
             document.body.classList.remove('tracking');
             if (elements.pulseDot) elements.pulseDot.classList.remove('active');
-            if (elements.ringLabel) {
+            if (elements.ringLabel && state.totalDistance > 0) {
+                elements.ringLabel.textContent = 'COMPLETE';
+            } else {
                 elements.ringLabel.textContent = 'READY';
-                elements.ringLabel.style.color = '';
             }
         }
         
-        // Update button states
         if (elements.startBtn) elements.startBtn.disabled = isTracking;
         if (elements.stopBtn) elements.stopBtn.disabled = !isTracking;
         
         updateStatus();
+    }
+
+    // ==========================================================
+    // Trip Management
+    // ==========================================================
+    
+    /**
+     * Load trips from localStorage
+     */
+    function loadTrips() {
+        try {
+            const saved = localStorage.getItem('vectortrack_trips');
+            state.trips = saved ? JSON.parse(saved) : [];
+            state.tripCount = state.trips.length;
+            renderTrips();
+        } catch (e) {
+            console.error('Failed to load trips:', e);
+            state.trips = [];
+        }
+    }
+
+    /**
+     * Save current trip
+     */
+    function saveTrip() {
+        if (state.totalDistance < 10) return; // Don't save very short trips
+        
+        const trip = {
+            id: Date.now(),
+            distance: state.totalDistance,
+            maxSpeed: state.maxSpeed,
+            avgSpeed: state.totalDistance / ((Date.now() - state.startTime) / 1000) * 3.6,
+            duration: Date.now() - state.startTime,
+            timestamp: new Date().toISOString(),
+            startCoords: state.routePath[0],
+            endCoords: state.routePath[state.routePath.length - 1]
+        };
+        
+        state.trips.unshift(trip);
+        
+        // Limit number of trips
+        if (state.trips.length > CONFIG.MAX_TRIPS) {
+            state.trips = state.trips.slice(0, CONFIG.MAX_TRIPS);
+        }
+        
+        try {
+            localStorage.setItem('vectortrack_trips', JSON.stringify(state.trips));
+            state.tripCount = state.trips.length;
+            renderTrips();
+            addLog('system', 'Trip saved');
+        } catch (e) {
+            console.error('Failed to save trip:', e);
+        }
+    }
+
+    /**
+     * Render trips list
+     */
+    function renderTrips() {
+        if (!elements.tripsBody || !elements.tripsCount) return;
+        
+        const empty = elements.tripsBody.querySelector('.trips-empty');
+        if (empty) empty.remove();
+        
+        elements.tripsCount.textContent = `${state.tripCount} trip${state.tripCount !== 1 ? 's' : ''}`;
+        
+        if (state.trips.length === 0) {
+            elements.tripsBody.innerHTML = '<div class="trips-empty">No trips recorded yet. Press Start to begin.</div>';
+            return;
+        }
+        
+        elements.tripsBody.innerHTML = '';
+        
+        state.trips.forEach(trip => {
+            const distance = trip.distance >= 1000 
+                ? `${(trip.distance / 1000).toFixed(2)} km` 
+                : `${Math.round(trip.distance)} m`;
+            
+            const entry = document.createElement('div');
+            entry.className = 'trip-entry';
+            entry.innerHTML = `
+                <div class="trip-info">
+                    <div class="trip-distance">${distance}</div>
+                    <div class="trip-stats">
+                        <span>⌀ ${formatSpeed(trip.avgSpeed)} km/h</span>
+                        <span class="trip-max-speed">⬆️ ${formatSpeed(trip.maxSpeed)} km/h</span>
+                    </div>
+                </div>
+                <div class="trip-date">${formatDate(trip.timestamp)}</div>
+            `;
+            elements.tripsBody.appendChild(entry);
+        });
     }
 
     // ==========================================================
@@ -273,42 +380,69 @@ document.addEventListener('DOMContentLoaded', function() {
      * Initialize map
      */
     function initMap(lat, lon) {
-        // Check if Leaflet is available
-        if (typeof L === 'undefined') {
-            console.error('Leaflet not loaded');
-            addLog('error', 'Map library failed to load');
+        const mapContainer = document.getElementById('map');
+        if (!mapContainer) return false;
+        
+        // Clear container
+        mapContainer.innerHTML = '';
+        
+        try {
+            // Create map
+            state.map = L.map('map', {
+                center: [lat, lon],
+                zoom: 17,
+                zoomControl: true,
+                attributionControl: true
+            });
+            
+            // Add tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap',
+                maxZoom: 19
+            }).addTo(state.map);
+            
+            // Add polyline
+            state.polyline = L.polyline([], {
+                color: '#00f0ff',
+                weight: 4,
+                opacity: 0.8
+            }).addTo(state.map);
+            
+            // Add marker
+            state.marker = L.marker([lat, lon]).addTo(state.map);
+            
+            // Force map to refresh
+            setTimeout(() => {
+                if (state.map) {
+                    state.map.invalidateSize();
+                }
+            }, 100);
+            
+            return true;
+        } catch (e) {
+            console.error('Map initialization error:', e);
             return false;
         }
+    }
+
+    /**
+     * Update map with new position
+     */
+    function updateMap(lat, lon) {
+        if (!state.map || !state.polyline || !state.marker) return;
         
-        // Remove existing map if any
-        if (state.map) {
-            state.map.remove();
-            state.map = null;
-        }
+        // Update polyline
+        state.polyline.addLatLng([lat, lon]);
         
-        // Create new map
-        state.map = L.map('map').setView([lat, lon], 17);
+        // Update marker position
+        state.marker.setLatLng([lat, lon]);
         
-        // Add tile layer
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap'
-        }).addTo(state.map);
-        
-        // Initialize polyline
-        state.polyline = L.polyline(state.routePath, {
-            color: '#00f0ff',
-            weight: 4,
-            opacity: 0.8
-        }).addTo(state.map);
-        
-        // Add marker
-        L.marker([lat, lon]).addTo(state.map);
-        
-        return true;
+        // Center map on new position
+        state.map.setView([lat, lon]);
     }
 
     // ==========================================================
-    // GPS Tracking Functions
+    // GPS Tracking
     // ==========================================================
     
     /**
@@ -324,14 +458,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         // Add point to route
-        const point = [lat, lon];
-        state.routePath.push(point);
+        state.routePath.push([lat, lon]);
         
-        // Update polyline
-        if (state.polyline) {
-            state.polyline.setLatLngs(state.routePath);
-            if (state.map) state.map.setView(point);
-        }
+        // Update map
+        updateMap(lat, lon);
         
         // Calculate distance and speed
         if (state.lastPosition && state.lastTimestamp) {
@@ -342,7 +472,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 lon
             );
             
-            const timeDiff = (timestamp - state.lastTimestamp) / 1000; // Convert to seconds
+            const timeDiff = (timestamp - state.lastTimestamp) / 1000;
             
             if (distance > CONFIG.MIN_DISTANCE && timeDiff > 0) {
                 // Update total distance
@@ -350,44 +480,47 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateDistanceDisplay(state.totalDistance);
                 updateRingProgress(state.totalDistance);
                 
-                // Calculate instant speed
+                // Calculate speed
                 const instantSpeed = calculateSpeed(distance, timeDiff);
                 
-                // Smooth the speed
-                state.currentSpeed = smoothSpeed(instantSpeed);
+                // Smooth speed
+                state.speedHistory.push(instantSpeed);
+                if (state.speedHistory.length > 5) {
+                    state.speedHistory.shift();
+                }
+                state.currentSpeed = state.speedHistory.reduce((a, b) => a + b, 0) / state.speedHistory.length;
                 
                 // Update max speed
                 if (state.currentSpeed > state.maxSpeed) {
                     state.maxSpeed = state.currentSpeed;
-                    addLog('speed', 'New max speed', state.maxSpeed);
                 }
                 
-                // Log significant speed changes
-                if (state.currentSpeed > 20 && state.speedHistory.length < 10) {
-                    addLog('speed', 'Moving fast', state.currentSpeed);
+                // Update displays
+                updateSpeedDisplay();
+                
+                // Log significant speeds
+                if (state.currentSpeed > 30 && state.speedHistory.length === 5) {
+                    addLog('speed', `Fast speed: ${formatSpeed(state.currentSpeed)} km/h`);
                 }
             }
         }
         
-        // Update last position and timestamp
+        // Update last position
         state.lastPosition = { lat, lon };
         state.lastTimestamp = timestamp;
-        
-        // Update accuracy
         state.lastAccuracy = accuracy;
         
-        // Update coordinates display
+        // Update coordinates
         if (elements.endCoords) {
             elements.endCoords.textContent = formatCoordinates(lat, lon);
         }
         
-        // Set start coordinates if this is the first point
+        // Set start coordinates if first point
         if (state.routePath.length === 1 && elements.startCoords) {
             elements.startCoords.textContent = formatCoordinates(lat, lon);
             addLog('start', 'Tracking started');
         }
         
-        // Update status with speed
         updateStatus();
     }
 
@@ -422,7 +555,7 @@ document.addEventListener('DOMContentLoaded', function() {
      */
     function startTracking() {
         if (!navigator.geolocation) {
-            alert('GPS not supported on this device');
+            alert('GPS is not supported on this device');
             return;
         }
         
@@ -430,7 +563,7 @@ document.addEventListener('DOMContentLoaded', function() {
             elements.statusEl.textContent = 'Acquiring GPS...';
         }
         
-        // Reset state for new session
+        // Reset state
         state.totalDistance = 0;
         state.routePath = [];
         state.lastPosition = null;
@@ -441,14 +574,16 @@ document.addEventListener('DOMContentLoaded', function() {
         
         updateDistanceDisplay(0);
         updateRingProgress(0);
+        updateSpeedDisplay();
         
         // Get initial position
         navigator.geolocation.getCurrentPosition(
             position => {
-                const { latitude: lat, longitude: lon, timestamp } = position.coords;
+                const { latitude: lat, longitude: lon } = position.coords;
                 
                 // Initialize map
                 if (!initMap(lat, lon)) {
+                    alert('Failed to initialize map');
                     return;
                 }
                 
@@ -459,7 +594,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 // Set initial position
                 state.lastPosition = { lat, lon };
-                state.lastTimestamp = timestamp;
+                state.lastTimestamp = Date.now();
                 
                 // Start watching position
                 state.watchId = navigator.geolocation.watchPosition(
@@ -468,7 +603,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     {
                         enableHighAccuracy: true,
                         maximumAge: 0,
-                        timeout: 8000
+                        timeout: 10000
                     }
                 );
                 
@@ -479,7 +614,8 @@ document.addEventListener('DOMContentLoaded', function() {
             handleError,
             {
                 enableHighAccuracy: true,
-                timeout: 10000
+                timeout: 15000,
+                maximumAge: 0
             }
         );
     }
@@ -493,35 +629,26 @@ document.addEventListener('DOMContentLoaded', function() {
             state.watchId = null;
         }
         
-        // Calculate average speed
-        const duration = (Date.now() - state.startTime) / 1000; // seconds
-        const avgSpeed = (state.totalDistance / duration) * 3.6; // km/h
+        // Save trip
+        if (state.totalDistance > 0) {
+            saveTrip();
+        }
         
         updateTrackingState(false);
         
-        if (elements.ringLabel) {
-            elements.ringLabel.textContent = 'COMPLETE';
-            elements.ringLabel.style.color = 'var(--magenta)';
-        }
-        
         if (elements.statusEl) {
-            elements.statusEl.textContent = `Trip completed • Avg: ${formatSpeed(avgSpeed)} • Max: ${formatSpeed(state.maxSpeed)}`;
+            if (state.totalDistance > 0) {
+                elements.statusEl.textContent = `Trip saved • Max: ${formatSpeed(state.maxSpeed)} km/h`;
+            } else {
+                elements.statusEl.textContent = 'Trip cancelled';
+            }
         }
         
-        // Save trip data
-        saveTripData({
-            distance: state.totalDistance,
-            maxSpeed: state.maxSpeed,
-            avgSpeed: avgSpeed,
-            duration: duration,
-            timestamp: new Date().toISOString()
-        });
-        
-        addLog('stop', `Trip finished - Max: ${formatSpeed(state.maxSpeed)}`, state.maxSpeed);
+        addLog('stop', `Trip finished - ${formatSpeed(state.maxSpeed)} km/h max`);
     }
 
     /**
-     * Reset session
+     * Reset tracking
      */
     function resetTracking() {
         // Stop tracking if active
@@ -542,6 +669,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Update UI
         updateDistanceDisplay(0);
         updateRingProgress(0);
+        updateSpeedDisplay();
         
         if (elements.startCoords) elements.startCoords.textContent = '—';
         if (elements.endCoords) elements.endCoords.textContent = '—';
@@ -555,34 +683,6 @@ document.addEventListener('DOMContentLoaded', function() {
         
         updateTrackingState(false);
         addLog('reset', 'Session reset');
-    }
-
-    // ==========================================================
-    // Data Persistence
-    // ==========================================================
-    
-    /**
-     * Save trip data to localStorage
-     */
-    function saveTripData(tripData) {
-        try {
-            let trips = JSON.parse(localStorage.getItem('vectortrack_trips')) || [];
-            trips.push({
-                ...tripData,
-                id: Date.now(),
-                date: new Date().toLocaleDateString()
-            });
-            
-            // Keep only last 20 trips
-            if (trips.length > 20) {
-                trips = trips.slice(-20);
-            }
-            
-            localStorage.setItem('vectortrack_trips', JSON.stringify(trips));
-            addLog('system', 'Trip saved to history');
-        } catch (e) {
-            console.error('Failed to save trip:', e);
-        }
     }
 
     // ==========================================================
@@ -601,22 +701,17 @@ document.addEventListener('DOMContentLoaded', function() {
         elements.resetBtn.addEventListener('click', resetTracking);
     }
     
-    // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-        // Space to start/stop (only if not typing in an input)
-        if (e.code === 'Space' && !e.repeat && !e.target.matches('input, textarea, button')) {
-            e.preventDefault();
-            if (state.isTracking) {
-                stopTracking();
-            } else {
-                startTracking();
-            }
+    // Handle visibility change to refresh map
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden && state.map) {
+            state.map.invalidateSize();
         }
-        
-        // R to reset (with Ctrl/Cmd)
-        if ((e.code === 'KeyR') && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            resetTracking();
+    });
+
+    // Handle resize for map
+    window.addEventListener('resize', function() {
+        if (state.map) {
+            state.map.invalidateSize();
         }
     });
 
@@ -624,9 +719,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize
     // ==========================================================
     
+    // Load trips
+    loadTrips();
+    
     // Add welcome log
     setTimeout(() => {
         addLog('system', 'VectorTrack ready');
-        console.log('VectorTrack initialized with speed tracking');
+        console.log('VectorTrack initialized successfully');
     }, 500);
 });
